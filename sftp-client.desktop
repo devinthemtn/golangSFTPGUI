@@ -1,0 +1,24 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SFTP Client
+Comment=Graphical SFTP client for secure file transfers
+GenericName=SFTP Client
+Keywords=sftp;ssh;file;transfer;remote;server;
+Exec=/usr/local/bin/sftp-client-gui
+Icon=sftp-client
+Terminal=false
+Categories=Network;FileTransfer;
+MimeType=x-scheme-handler/sftp;
+StartupNotify=true
+StartupWMClass=SFTP Client
+
+# Localization
+Name[en_US]=SFTP Client
+Comment[en_US]=Graphical SFTP client for secure file transfers
+GenericName[en_US]=SFTP Client
+
+# Additional metadata
+X-GNOME-Bugzilla-Bugzilla=GNOME
+X-GNOME-Bugzilla-Product=sftp-client
+X-GNOME-Bugzilla-Component=general
