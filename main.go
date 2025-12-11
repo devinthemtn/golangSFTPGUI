@@ -34,15 +34,19 @@ type SFTPApp struct {
 	client *SFTPGUIClient
 
 	// Connection widgets
-	hostEntry     *widget.Entry
-	portEntry     *widget.Entry
-	userEntry     *widget.Entry
-	passEntry     *widget.Entry
-	keyEntry      *widget.Entry
-	useKeyCheck   *widget.Check
-	connectBtn    *widget.Button
-	disconnectBtn *widget.Button
-	statusLabel   *widget.Label
+	hostEntry         *widget.Entry
+	portEntry         *widget.Entry
+	userEntry         *widget.Entry
+	passEntry         *widget.Entry
+	keyEntry          *widget.Entry
+	useKeyCheck       *widget.Check
+	connectBtn        *widget.Button
+	disconnectBtn     *widget.Button
+	statusLabel       *widget.Label
+	connectionPanel   *fyne.Container
+	connectionContent *fyne.Container
+	collapseBtn       *widget.Button
+	isCollapsed       bool
 
 	// File browser widgets
 	remoteList *widget.List
@@ -298,9 +302,27 @@ func (app *SFTPApp) createConnectionPanel() fyne.CanvasObject {
 	authPanel := container.NewHBox(app.useKeyCheck)
 	buttonPanel := container.NewHBox(app.connectBtn, app.disconnectBtn, layout.NewSpacer(), app.statusLabel)
 
-	return container.NewVBox(
-		widget.NewCard("Connection", "", container.NewVBox(form, authPanel, buttonPanel)),
+	// Create the connection details content
+	app.connectionContent = container.NewVBox(form, authPanel, buttonPanel)
+
+	// Create collapse/expand button
+	app.collapseBtn = widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
+		app.toggleConnectionPanel()
+	})
+	app.collapseBtn.Resize(fyne.NewSize(30, 30))
+
+	// Create header with collapse button
+	headerPanel := container.NewBorder(nil, nil, nil, app.collapseBtn,
+		widget.NewLabelWithStyle("Connection", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+
+	// Create main connection panel
+	app.connectionPanel = container.NewVBox(
+		headerPanel,
+		app.connectionContent,
 	)
+
+	app.isCollapsed = false
+	return app.connectionPanel
 }
 
 // createBrowserPanel creates the file browser panel
@@ -505,6 +527,11 @@ func (app *SFTPApp) onConnected() {
 	app.remotePath.SetText(".")
 	app.currentRemote = "."
 	app.updateRemoteFiles()
+
+	// Collapse the connection panel to save space
+	if !app.isCollapsed {
+		app.toggleConnectionPanel()
+	}
 }
 
 func (app *SFTPApp) onDisconnected() {
@@ -523,6 +550,11 @@ func (app *SFTPApp) onDisconnected() {
 	app.remoteFiles.Set([]string{})
 
 	app.logMessage("Disconnected")
+
+	// Expand the connection panel when disconnected
+	if app.isCollapsed {
+		app.toggleConnectionPanel()
+	}
 }
 
 func (app *SFTPApp) onUpload() {
@@ -720,6 +752,26 @@ func (app *SFTPApp) showError(message string) {
 // Run starts the application
 func (app *SFTPApp) Run() {
 	app.window.ShowAndRun()
+}
+
+func (app *SFTPApp) toggleConnectionPanel() {
+	if app.isCollapsed {
+		// Expand
+		app.connectionPanel.Objects = []fyne.CanvasObject{
+			app.connectionPanel.Objects[0], // header
+			app.connectionContent,
+		}
+		app.collapseBtn.SetIcon(theme.MenuDropDownIcon())
+		app.isCollapsed = false
+	} else {
+		// Collapse
+		app.connectionPanel.Objects = []fyne.CanvasObject{
+			app.connectionPanel.Objects[0], // header only
+		}
+		app.collapseBtn.SetIcon(theme.MenuDropUpIcon())
+		app.isCollapsed = true
+	}
+	app.connectionPanel.Refresh()
 }
 
 func main() {
