@@ -11,6 +11,7 @@ A modern graphical SFTP (SSH File Transfer Protocol) client written in Go using 
 - **Collapsible Connection Panel** - Automatically collapses when connected to save screen space
 - **Collapsible Activity Log** - Activity log panel collapses when connected to maximize file browser space
 - **Footer Status Bar** - Always-visible connection status with quick disconnect button
+- **Open Local Files** - Open files with system default applications directly from the client
 - **Quick Connect** - One-click connection from saved bookmarks
 - **Drag-and-drop Operations** - Easy file upload and download
 - **Visual File Management** - Create, delete, and navigate directories
@@ -112,6 +113,7 @@ go build -o sftp-client-cli cli-main.go
 #### Operations Panel (Right)
 - **Upload**: Transfer selected local file to remote server
 - **Download**: Transfer selected remote file to local system
+- **Open**: Open selected local file with system default application
 - **Delete**: Remove selected remote file (with confirmation)
 - **New Folder**: Create new directory on remote server
 - **Refresh**: Update both file lists
@@ -162,12 +164,20 @@ The GUI provides an intuitive dual-pane interface:
 3. Click "Browse" to select your private key file
 4. Click "Connect"
 
-#### 5. File Transfer
+#### 5. File Operations
 1. **Upload**: Select file in left panel → Click "Upload"
 2. **Download**: Select file in right panel → Click "Download"
-3. **Batch Operations**: Repeat for multiple files
+3. **Open Local Files**: Select file in left panel → Click "Open" or double-click
+4. **Batch Operations**: Repeat for multiple files
 
-#### 6. Directory Management
+#### 6. Opening Local Files
+1. **Button Method**: Select a local file → Click "Open" button
+2. **Double-click Method**: Double-click any file in the local file list
+3. **System Integration**: Files open with their default applications
+4. **File Type Support**: Works with any file type (text, images, documents, etc.)
+5. **Error Handling**: Shows helpful messages for directories or missing files
+
+#### 7. Directory Management
 1. **Navigate**: Double-click folders or type path in path entry
 2. **Create Folder**: Click "New Folder" and enter name
 3. **Delete**: Select item and click "Delete" (with confirmation)
@@ -223,6 +233,13 @@ The application automatically adapts its interface based on connection state:
 - **Intelligent Defaults**: Panels automatically collapse/expand based on workflow needs
 - **Always-Accessible Controls**: Critical functions like disconnect remain visible
 - **Visual Status Indicators**: Color-coded status (🔵/🔴) for instant connection state recognition
+
+#### File Integration
+- **System Default Applications**: Open any local file with its default application
+- **Cross-Platform Support**: Works on Windows (`rundll32`), macOS (`open`), and Linux (`xdg-open`)
+- **Double-Click Convenience**: Quick file opening without extra clicks
+- **Smart File Detection**: Automatically prevents opening directories as files
+- **Activity Logging**: All file open operations are logged for reference
 
 ### Bookmarks Management
 
@@ -284,6 +301,41 @@ The app uses Go's `os.UserHomeDir()` function to automatically detect the correc
 
 #### Migration from Old Location
 If you have existing bookmarks from a previous version stored at `~/.sftp-client-bookmarks.json`, they will be automatically migrated to the new location when you first run the updated app.
+
+### Technical Implementation
+
+#### Open File Functionality
+The open file feature uses platform-specific commands to launch files with their default applications:
+
+```go
+func (app *SFTPApp) openWithSystemDefault(filepath string) error {
+    var cmd *exec.Cmd
+
+    switch runtime.GOOS {
+    case "windows":
+        cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", filepath)
+    case "darwin":
+        cmd = exec.Command("open", filepath)
+    case "linux":
+        cmd = exec.Command("xdg-open", filepath)
+    default:
+        return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+    }
+
+    return cmd.Start()
+}
+```
+
+**Platform Commands:**
+- **Windows**: `rundll32 url.dll,FileProtocolHandler` - Uses Windows shell association
+- **macOS**: `open` - Uses macOS Launch Services
+- **Linux**: `xdg-open` - Uses XDG MIME type associations
+
+**Double-Click Detection:**
+- Tracks click timing and list item ID
+- 500ms window for double-click detection
+- Only opens files (not directories)
+- Integrates seamlessly with existing file selection
 
 ### Build Options
 ```bash

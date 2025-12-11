@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -79,6 +81,7 @@ type SFTPApp struct {
 	deleteBtn   *widget.Button
 	mkdirBtn    *widget.Button
 	refreshBtn  *widget.Button
+	openBtn     *widget.Button
 
 	// Status and progress
 	progressBar *widget.ProgressBar
@@ -478,10 +481,24 @@ func (app *SFTPApp) createBrowserPanel() fyne.CanvasObject {
 			label.SetText(val)
 		},
 	)
+	// Add double-click functionality to open local files
+	var lastClickTime time.Time
+	var lastClickID widget.ListItemID = -1
 	app.localList.OnSelected = func(id widget.ListItemID) {
 		if val, err := app.localFiles.GetValue(id); err == nil {
 			app.selectedLocal = strings.TrimPrefix(val, "📄 ")
 			app.selectedLocal = strings.TrimPrefix(app.selectedLocal, "📁 ")
+
+			// Check for double-click (within 500ms)
+			now := time.Now()
+			if id == lastClickID && now.Sub(lastClickTime) < 500*time.Millisecond {
+				// Double-click detected - open the file if it's not a directory
+				if !strings.HasPrefix(val, "📁 ") {
+					app.onOpen()
+				}
+			}
+			lastClickTime = now
+			lastClickID = id
 		}
 	}
 
@@ -548,11 +565,15 @@ func (app *SFTPApp) createControlPanel() fyne.CanvasObject {
 	app.refreshBtn = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), app.onRefresh)
 	app.refreshBtn.Disable()
 
+	app.openBtn = widget.NewButtonWithIcon("Open", theme.DocumentIcon(), app.onOpen)
+
 	return container.NewVBox(
 		widget.NewCard("Operations", "",
 			container.NewVBox(
 				app.uploadBtn,
 				app.downloadBtn,
+				widget.NewSeparator(),
+				app.openBtn,
 				widget.NewSeparator(),
 				app.deleteBtn,
 				app.mkdirBtn,
@@ -839,6 +860,32 @@ func (app *SFTPApp) onMkdir() {
 func (app *SFTPApp) onRefresh() {
 	app.updateRemoteFiles()
 	app.updateLocalFiles()
+}
+
+func (app *SFTPApp) onOpen() {
+	if app.selectedLocal == "" {
+		app.showError("Please select a local file to open")
+		return
+	}
+
+	localFile := filepath.Join(app.currentLocal, app.selectedLocal)
+
+	// Check if it's a file (not a directory)
+	if info, err := os.Stat(localFile); err != nil {
+		app.showError(fmt.Sprintf("Cannot access file: %v", err))
+		return
+	} else if info.IsDir() {
+		app.showError("Cannot open directories. Please select a file.")
+		return
+	}
+
+	// Open with system default application
+	err := app.openWithSystemDefault(localFile)
+	if err != nil {
+		app.showError(fmt.Sprintf("Failed to open file: %v", err))
+	} else {
+		app.logMessage(fmt.Sprintf("Opened file: %s", app.selectedLocal))
+	}
 }
 
 // Helper methods
@@ -1184,6 +1231,24 @@ func (app *SFTPApp) quickConnectFromBookmark() {
 
 	// Trigger the connection
 	app.onConnect()
+}
+
+// openWithSystemDefault opens a file with the system's default application
+func (app *SFTPApp) openWithSystemDefault(filepath string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", filepath)
+	case "darwin":
+		cmd = exec.Command("open", filepath)
+	case "linux":
+		cmd = exec.Command("xdg-open", filepath)
+	default:
+		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+
+	return cmd.Start()
 }
 
 func main() {
