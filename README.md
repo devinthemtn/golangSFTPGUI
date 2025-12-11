@@ -7,6 +7,11 @@ A modern graphical SFTP (SSH File Transfer Protocol) client written in Go using 
 - **Modern GUI Interface** - Built with Fyne for cross-platform compatibility
 - **Dual-pane File Browser** - Side-by-side local and remote file browsing
 - **Multiple Authentication Methods** - Password and SSH key authentication
+- **Connection Bookmarks** - Save and manage frequently used server connections
+- **Collapsible Connection Panel** - Automatically collapses when connected to save screen space
+- **Collapsible Activity Log** - Activity log panel collapses when connected to maximize file browser space
+- **Footer Status Bar** - Always-visible connection status with quick disconnect button
+- **Quick Connect** - One-click connection from saved bookmarks
 - **Drag-and-drop Operations** - Easy file upload and download
 - **Visual File Management** - Create, delete, and navigate directories
 - **Real-time Activity Log** - Monitor all operations with timestamps
@@ -75,10 +80,28 @@ go build -o sftp-client-cli cli-main.go
 ### Main Interface
 
 #### Connection Panel (Top)
+- **Bookmarks**: Save and manage frequently used server connections
+  - **Select Bookmark**: Choose from saved connections
+  - **Quick Connect**: One-click connection from selected bookmark
+  - **Save**: Store current connection details as a new bookmark
+  - **Delete**: Remove selected bookmark (with confirmation)
 - **Host/Port/Username**: Server connection details
 - **Authentication**: Choose password or SSH key authentication
 - **Connect/Disconnect**: Manage server connection
 - **Status**: Shows current connection state
+- **Collapsible**: Panel automatically collapses when connected to save screen space
+
+#### Activity Log Panel (Bottom Center)
+- **Collapsible Log**: Activity log with expand/collapse functionality
+- **Auto-collapse**: Automatically collapses when connected to maximize file browser space
+- **Manual Toggle**: Click arrow button to manually expand/collapse anytime
+- **Real-time Updates**: All operations logged with timestamps
+
+#### Footer Status Bar (Bottom)
+- **Connection Status**: Clean visual indicator with emoji (🔵 Connected / 🔴 Disconnected)
+- **Quick Disconnect**: Always-accessible disconnect button
+- **Always Visible**: Footer remains visible regardless of panel collapse states
+- **Minimal Design**: Clean layout without redundant icons for better clarity
 
 #### File Browser (Center)
 - **Left Panel**: Local file system browser
@@ -93,10 +116,9 @@ go build -o sftp-client-cli cli-main.go
 - **New Folder**: Create new directory on remote server
 - **Refresh**: Update both file lists
 
-#### Activity Log (Bottom)
-- **Real-time Logging**: All operations are logged with timestamps
-- **Error Messages**: Failed operations show detailed error information
-- **Progress Feedback**: Visual indication of ongoing operations
+#### Progress Indicators
+- **Progress Bar**: Visual indication of ongoing file transfer operations
+- **Status Messages**: Real-time feedback for all operations
 
 ## Screenshots and Examples
 
@@ -114,18 +136,38 @@ The GUI provides an intuitive dual-pane interface:
 2. Enter username and password
 3. Click "Connect"
 
-#### 2. SSH Key Authentication
+#### 2. Using Bookmarks
+1. Fill in connection details for a server
+2. Click "Save" to create a bookmark
+3. Enter a name for the bookmark (e.g., "Production Server")
+4. Select the bookmark from the dropdown for future connections
+5. Use "Quick Connect" to connect immediately with bookmark settings
+6. Use "Delete" to remove unwanted bookmarks
+
+#### 3. Managing Screen Space
+1. **Connection Panel**: Automatically collapses when connected
+   - Click arrow button to manually toggle
+   - Expands automatically when disconnected
+2. **Activity Log**: Automatically collapses when connected
+   - Click arrow button to manually toggle  
+   - Expands automatically when disconnected
+3. **Footer Status**: Always shows connection state
+   - Clean status display: "🔵 Connected" or "🔴 Disconnected"
+   - Quick disconnect button always available
+   - Minimal design without redundant icons
+
+#### 4. SSH Key Authentication
 1. Enter server details in connection panel
 2. Check "Use SSH Key" checkbox
 3. Click "Browse" to select your private key file
 4. Click "Connect"
 
-#### 3. File Transfer
+#### 5. File Transfer
 1. **Upload**: Select file in left panel → Click "Upload"
 2. **Download**: Select file in right panel → Click "Download"
 3. **Batch Operations**: Repeat for multiple files
 
-#### 4. Directory Management
+#### 6. Directory Management
 1. **Navigate**: Double-click folders or type path in path entry
 2. **Create Folder**: Click "New Folder" and enter name
 3. **Delete**: Select item and click "Delete" (with confirmation)
@@ -137,6 +179,13 @@ The GUI provides an intuitive dual-pane interface:
 - **SSH Key Storage**: Store private keys securely with appropriate permissions (600)
 - **Password Security**: Passwords are handled securely in memory but not persisted
 - **Network Security**: All communications use encrypted SSH protocol
+
+## Accessibility Features
+
+- **Color Blind Friendly**: Status indicators use blue (🔵) and red (🔴) colors instead of green/red to improve accessibility for color blind users
+- **High Contrast**: Bold text and clear visual separators for better readability
+- **Keyboard Navigation**: Full keyboard support for all UI elements
+- **Screen Reader Friendly**: Proper labeling and semantic structure
 
 ## Dependencies
 
@@ -151,6 +200,90 @@ The GUI provides an intuitive dual-pane interface:
 - Keyboard shortcuts and accessibility features
 
 ## Advanced Features
+
+### User Experience Improvements
+
+#### Smart Interface Adaptation
+The application automatically adapts its interface based on connection state:
+
+- **Connected State**: 
+  - Connection panel collapses to save space
+  - Activity log collapses to maximize file browser area
+  - Footer shows "🔵 Connected" status
+  - Quick disconnect always available in footer
+
+- **Disconnected State**:
+  - Connection panel expands for easy reconnection
+  - Activity log expands to show connection attempts
+  - Footer shows "🔴 Disconnected" status
+  - Connection controls prominently displayed
+
+#### Space-Efficient Design
+- **Collapsible Panels**: Both connection and activity log panels can be manually toggled
+- **Intelligent Defaults**: Panels automatically collapse/expand based on workflow needs
+- **Always-Accessible Controls**: Critical functions like disconnect remain visible
+- **Visual Status Indicators**: Color-coded status (🔵/🔴) for instant connection state recognition
+
+### Bookmarks Management
+
+#### Storage Location
+Bookmarks are automatically saved to `~/.config/KAT-ftp/bookmarks.json` in your home directory's config folder.
+
+#### Bookmark File Format
+The bookmarks file uses JSON format:
+```json
+[
+  {
+    "name": "Production Server",
+    "host": "prod.example.com",
+    "port": "22",
+    "username": "admin",
+    "use_ssh_key": true,
+    "key_path": "/home/user/.ssh/id_rsa"
+  },
+  {
+    "name": "Development Server",
+    "host": "dev.example.com",
+    "port": "2222",
+    "username": "developer",
+    "use_ssh_key": false,
+    "key_path": ""
+  }
+]
+```
+
+#### Security Considerations
+- **Passwords are NOT stored** in bookmarks for security reasons
+- Only connection details and SSH key paths are saved
+- SSH key files should have proper permissions (600)
+- Bookmark file is created with restricted permissions (600)
+
+#### Manual Bookmark Management
+You can manually edit the bookmarks file or copy it between machines:
+```bash
+# View current bookmarks
+cat ~/.config/KAT-ftp/bookmarks.json
+
+# Backup bookmarks
+cp ~/.config/KAT-ftp/bookmarks.json ~/sftp-bookmarks-backup.json
+
+# Copy bookmarks to another machine
+scp ~/.config/KAT-ftp/bookmarks.json user@machine:~/
+
+# Set more secure permissions
+chmod 600 ~/.config/KAT-ftp/bookmarks.json
+```
+
+#### Cross-platform Locations
+The config directory is automatically detected for your operating system:
+- **macOS**: `/Users/yourusername/.config/KAT-ftp/bookmarks.json`
+- **Linux**: `/home/yourusername/.config/KAT-ftp/bookmarks.json` 
+- **Windows**: `C:\Users\yourusername\.config\KAT-ftp\bookmarks.json`
+
+The app uses Go's `os.UserHomeDir()` function to automatically detect the correct home directory and creates the `.config/KAT-ftp/` subdirectory for storing all application configuration files.
+
+#### Migration from Old Location
+If you have existing bookmarks from a previous version stored at `~/.sftp-client-bookmarks.json`, they will be automatically migrated to the new location when you first run the updated app.
 
 ### Build Options
 ```bash

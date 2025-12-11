@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Local Test Server",
+    "host": "localhost",
+    "port": "22",
+    "username": "testuser",
+    "use_ssh_key": false,
+    "key_path": ""
+  },
+  {
+    "name": "Production Server",
+    "host": "prod.example.com",
+    "port": "22",
+    "username": "admin",
+    "use_ssh_key": true,
+    "key_path": "/Users/testuser/.ssh/id_rsa"
+  },
+  {
+    "name": "Development Server",
+    "host": "dev.example.com",
+    "port": "2222",
+    "username": "developer",
+    "use_ssh_key": false,
+    "key_path": ""
+  }
+]

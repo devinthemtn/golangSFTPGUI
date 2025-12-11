@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,16 @@ import (
 )
 
 // SFTPGUIClient wraps the SFTP functionality for GUI use
+// Bookmark represents a saved connection configuration
+type Bookmark struct {
+	Name      string `json:"name"`
+	Host      string `json:"host"`
+	Port      string `json:"port"`
+	Username  string `json:"username"`
+	UseSSHKey bool   `json:"use_ssh_key"`
+	KeyPath   string `json:"key_path,omitempty"`
+}
+
 type SFTPGUIClient struct {
 	sshClient  *ssh.Client
 	sftpClient *sftp.Client
@@ -48,6 +59,14 @@ type SFTPApp struct {
 	collapseBtn       *widget.Button
 	isCollapsed       bool
 
+	// Bookmark widgets
+	bookmarkSelect    *widget.Select
+	saveBookmarkBtn   *widget.Button
+	deleteBookmarkBtn *widget.Button
+	quickConnectBtn   *widget.Button
+	bookmarks         []Bookmark
+	bookmarksFile     string
+
 	// File browser widgets
 	remoteList *widget.List
 	localList  *widget.List
@@ -64,6 +83,17 @@ type SFTPApp struct {
 	// Status and progress
 	progressBar *widget.ProgressBar
 	logArea     *widget.Entry
+
+	// Activity log collapse
+	logPanel       *fyne.Container
+	logContent     *fyne.Container
+	logCollapseBtn *widget.Button
+	isLogCollapsed bool
+
+	// Footer widgets
+	footerPanel      *fyne.Container
+	connectionStatus *widget.Label
+	footerDisconnect *widget.Button
 
 	// Data bindings
 	remoteFiles    binding.StringList
@@ -199,18 +229,72 @@ func (c *SFTPGUIClient) GetFiles(path string) ([]string, error) {
 // NewSFTPApp creates a new SFTP GUI application
 func NewSFTPApp() *SFTPApp {
 	myApp := app.New()
-	myApp.SetIcon(AppIcon())
-	myWin := myApp.NewWindow("SFTP Client")
-	myWin.Resize(fyne.NewSize(1000, 700))
+	// Commenting out icon to avoid corruption error
+	// myApp.SetIcon(AppIcon())
 
-	sftpApp := &SFTPApp{
-		app:    myApp,
-		window: myWin,
-		client: NewSFTPGUIClient(),
+	window := myApp.NewWindow("SFTP Client")
+	window.Resize(fyne.NewSize(1200, 800))
+
+	// Get application config directory
+	configDir, err := getConfigDir()
+	if err != nil {
+		fmt.Printf("Warning: Could not create config directory: %v\n", err)
+		// Fallback to home directory
+		homeDir, _ := os.UserHomeDir()
+		configDir = homeDir
 	}
 
+	bookmarksFile := filepath.Join(configDir, "bookmarks.json")
+
+	// Migrate existing bookmarks from old location if they exist
+	homeDir, _ := os.UserHomeDir()
+	oldBookmarksFile := filepath.Join(homeDir, ".sftp-client-bookmarks.json")
+	migrateOldBookmarks(oldBookmarksFile, bookmarksFile)
+
+	sftpApp := &SFTPApp{
+		app:           myApp,
+		window:        window,
+		client:        NewSFTPGUIClient(),
+		bookmarksFile: bookmarksFile,
+	}
+
+	// Load bookmarks before setting up UI
+	sftpApp.loadBookmarks()
 	sftpApp.setupUI()
 	return sftpApp
+}
+
+// getConfigDir returns the application's configuration directory
+func getConfigDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	configDir := filepath.Join(homeDir, ".config", "KAT-ftp")
+
+	// Create config directory if it doesn't exist
+	err = os.MkdirAll(configDir, 0755)
+	if err != nil {
+		return "", err
+	}
+
+	return configDir, nil
+}
+
+// migrateOldBookmarks migrates bookmarks from the old location to new location
+func migrateOldBookmarks(oldPath, newPath string) {
+	if _, err := os.Stat(oldPath); err == nil {
+		// Old bookmarks file exists, check if new one doesn't
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			// Copy old bookmarks to new location
+			if data, err := os.ReadFile(oldPath); err == nil {
+				os.WriteFile(newPath, data, 0600)
+				fmt.Printf("Migrated bookmarks from %s to %s\n", oldPath, newPath)
+				// Optionally remove old file after successful migration
+				// os.Remove(oldPath)
+			}
+		}
+	}
 }
 
 // setupUI creates and configures the user interface
@@ -231,12 +315,20 @@ func (app *SFTPApp) setupUI() {
 	// Create status panel
 	statusPanel := app.createStatusPanel()
 
-	// Create main layout
-	content := container.New(layout.NewBorderLayout(connectionPanel, statusPanel, nil, controlPanel),
-		connectionPanel,
+	// Create footer panel
+	footerPanel := app.createFooterPanel()
+
+	// Create main layout with proper separation
+	mainContent := container.New(layout.NewBorderLayout(nil, statusPanel, nil, nil),
 		statusPanel,
-		controlPanel,
 		browserPanel,
+	)
+
+	content := container.New(layout.NewBorderLayout(connectionPanel, footerPanel, nil, controlPanel),
+		connectionPanel,
+		footerPanel,
+		controlPanel,
+		mainContent,
 	)
 
 	app.window.SetContent(content)
@@ -302,8 +394,38 @@ func (app *SFTPApp) createConnectionPanel() fyne.CanvasObject {
 	authPanel := container.NewHBox(app.useKeyCheck)
 	buttonPanel := container.NewHBox(app.connectBtn, app.disconnectBtn, layout.NewSpacer(), app.statusLabel)
 
+	// Create bookmark widgets
+	app.bookmarkSelect = widget.NewSelect(app.getBookmarkNames(), func(selected string) {
+		app.loadBookmarkByName(selected)
+	})
+	// Note: Fyne Select widget doesn't have SetPlaceHolder in v2.4.3
+	app.bookmarkSelect.PlaceHolder = "Select a bookmark..."
+
+	app.saveBookmarkBtn = widget.NewButtonWithIcon("Save", theme.DocumentSaveIcon(), func() {
+		app.showSaveBookmarkDialog()
+	})
+
+	app.deleteBookmarkBtn = widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), func() {
+		app.deleteSelectedBookmark()
+	})
+	app.deleteBookmarkBtn.Disable()
+
+	app.quickConnectBtn = widget.NewButtonWithIcon("Quick Connect", theme.MailForwardIcon(), func() {
+		app.quickConnectFromBookmark()
+	})
+	app.quickConnectBtn.Disable()
+
+	// Create bookmark panel
+	bookmarkPanel := container.NewHBox(
+		widget.NewLabel("Bookmarks:"),
+		app.bookmarkSelect,
+		app.quickConnectBtn,
+		app.saveBookmarkBtn,
+		app.deleteBookmarkBtn,
+	)
+
 	// Create the connection details content
-	app.connectionContent = container.NewVBox(form, authPanel, buttonPanel)
+	app.connectionContent = container.NewVBox(bookmarkPanel, form, authPanel, buttonPanel)
 
 	// Create collapse/expand button
 	app.collapseBtn = widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
@@ -453,9 +575,30 @@ func (app *SFTPApp) createStatusPanel() fyne.CanvasObject {
 	logScroll := container.NewScroll(app.logArea)
 	logScroll.SetMinSize(fyne.NewSize(0, 150))
 
+	// Create the log content
+	app.logContent = container.NewVBox(logScroll)
+
+	// Create collapse/expand button for log
+	app.logCollapseBtn = widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
+		app.toggleLogPanel()
+	})
+	app.logCollapseBtn.Resize(fyne.NewSize(30, 30))
+
+	// Create header with collapse button
+	logHeaderPanel := container.NewBorder(nil, nil, nil, app.logCollapseBtn,
+		widget.NewLabelWithStyle("Activity Log", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+
+	// Create main log panel
+	app.logPanel = container.NewVBox(
+		logHeaderPanel,
+		app.logContent,
+	)
+
+	app.isLogCollapsed = false
+
 	return container.NewVBox(
 		app.progressBar,
-		widget.NewCard("Activity Log", "", logScroll),
+		app.logPanel,
 	)
 }
 
@@ -504,6 +647,27 @@ func (app *SFTPApp) onConnect() {
 	app.onConnected()
 }
 
+// createFooterPanel creates the footer with connection status and disconnect button
+func (app *SFTPApp) createFooterPanel() fyne.CanvasObject {
+	// Create connection status label (no redundant icon needed)
+	app.connectionStatus = widget.NewLabel("🔴 Disconnected")
+	app.connectionStatus.TextStyle.Bold = true
+
+	// Create footer disconnect button
+	app.footerDisconnect = widget.NewButtonWithIcon("Disconnect", theme.CancelIcon(), app.onDisconnect)
+	app.footerDisconnect.Disable()
+
+	// Create footer panel with clean design
+	app.footerPanel = container.NewBorder(
+		nil, nil,
+		app.connectionStatus,
+		app.footerDisconnect,
+		widget.NewSeparator(),
+	)
+
+	return app.footerPanel
+}
+
 func (app *SFTPApp) onDisconnect() {
 	app.client.Disconnect()
 	app.onDisconnected()
@@ -532,6 +696,15 @@ func (app *SFTPApp) onConnected() {
 	if !app.isCollapsed {
 		app.toggleConnectionPanel()
 	}
+
+	// Update footer status
+	app.connectionStatus.SetText("🔵 Connected")
+	app.footerDisconnect.Enable()
+
+	// Collapse the activity log to save space
+	if !app.isLogCollapsed {
+		app.toggleLogPanel()
+	}
 }
 
 func (app *SFTPApp) onDisconnected() {
@@ -554,6 +727,20 @@ func (app *SFTPApp) onDisconnected() {
 	// Expand the connection panel when disconnected
 	if app.isCollapsed {
 		app.toggleConnectionPanel()
+	}
+
+	// Update bookmark selection state
+	app.bookmarkSelect.ClearSelected()
+	app.deleteBookmarkBtn.Disable()
+	app.quickConnectBtn.Disable()
+
+	// Update footer status
+	app.connectionStatus.SetText("🔴 Disconnected")
+	app.footerDisconnect.Disable()
+
+	// Expand the activity log when disconnected
+	if app.isLogCollapsed {
+		app.toggleLogPanel()
 	}
 }
 
@@ -772,6 +959,231 @@ func (app *SFTPApp) toggleConnectionPanel() {
 		app.isCollapsed = true
 	}
 	app.connectionPanel.Refresh()
+}
+
+func (app *SFTPApp) toggleLogPanel() {
+	if app.isLogCollapsed {
+		// Expand
+		app.logPanel.Objects = []fyne.CanvasObject{
+			app.logPanel.Objects[0], // header
+			app.logContent,
+		}
+		app.logCollapseBtn.SetIcon(theme.MenuDropDownIcon())
+		app.isLogCollapsed = false
+	} else {
+		// Collapse
+		app.logPanel.Objects = []fyne.CanvasObject{
+			app.logPanel.Objects[0], // header only
+		}
+		app.logCollapseBtn.SetIcon(theme.MenuDropUpIcon())
+		app.isLogCollapsed = true
+	}
+	app.logPanel.Refresh()
+}
+
+// Bookmark management functions
+func (app *SFTPApp) loadBookmarks() {
+	data, err := os.ReadFile(app.bookmarksFile)
+	if err != nil {
+		// File doesn't exist or can't be read, start with empty bookmarks
+		app.bookmarks = []Bookmark{}
+		return
+	}
+
+	err = json.Unmarshal(data, &app.bookmarks)
+	if err != nil {
+		// Don't use logMessage here as UI isn't initialized yet
+		fmt.Printf("Warning: Error loading bookmarks: %v\n", err)
+		app.bookmarks = []Bookmark{}
+	}
+}
+
+func (app *SFTPApp) saveBookmarks() {
+	data, err := json.MarshalIndent(app.bookmarks, "", "  ")
+	if err != nil {
+		app.showError("Error saving bookmarks: " + err.Error())
+		return
+	}
+
+	err = os.WriteFile(app.bookmarksFile, data, 0600)
+	if err != nil {
+		app.showError("Error writing bookmarks file: " + err.Error())
+	}
+}
+
+func (app *SFTPApp) getBookmarkNames() []string {
+	names := make([]string, len(app.bookmarks))
+	for i, bookmark := range app.bookmarks {
+		names[i] = bookmark.Name
+	}
+	return names
+}
+
+func (app *SFTPApp) loadBookmarkByName(name string) {
+	for _, bookmark := range app.bookmarks {
+		if bookmark.Name == name {
+			app.loadBookmark(bookmark)
+			app.deleteBookmarkBtn.Enable()
+			app.quickConnectBtn.Enable()
+			return
+		}
+	}
+}
+
+func (app *SFTPApp) loadBookmark(bookmark Bookmark) {
+	app.hostEntry.SetText(bookmark.Host)
+	app.portEntry.SetText(bookmark.Port)
+	app.userEntry.SetText(bookmark.Username)
+	app.useKeyCheck.SetChecked(bookmark.UseSSHKey)
+
+	if bookmark.UseSSHKey {
+		app.passEntry.Disable()
+		app.keyEntry.Enable()
+		app.keyEntry.SetText(bookmark.KeyPath)
+		// Validate SSH key path if provided
+		if bookmark.KeyPath != "" {
+			if _, err := os.Stat(bookmark.KeyPath); os.IsNotExist(err) {
+				app.logMessage("Warning: SSH key file not found: " + bookmark.KeyPath)
+			}
+		}
+	} else {
+		app.passEntry.Enable()
+		app.keyEntry.Disable()
+		app.keyEntry.SetText("")
+	}
+}
+
+func (app *SFTPApp) showSaveBookmarkDialog() {
+	// Validate before showing dialog
+	if app.hostEntry.Text == "" {
+		app.showError("Please enter a host before saving bookmark")
+		return
+	}
+	if app.userEntry.Text == "" {
+		app.showError("Please enter a username before saving bookmark")
+		return
+	}
+
+	nameEntry := widget.NewEntry()
+	nameEntry.SetPlaceHolder("Bookmark name")
+
+	// Pre-fill with host if available
+	if app.hostEntry.Text != "" {
+		nameEntry.SetText(app.hostEntry.Text)
+	}
+
+	dialog := dialog.NewForm("Save Bookmark", "Save", "Cancel",
+		[]*widget.FormItem{
+			widget.NewFormItem("Name", nameEntry),
+		}, func(ok bool) {
+			if !ok || nameEntry.Text == "" {
+				return
+			}
+			app.saveCurrentAsBookmark(nameEntry.Text)
+		}, app.window)
+
+	dialog.Show()
+}
+
+func (app *SFTPApp) saveCurrentAsBookmark(name string) {
+	// Validate required fields
+	if app.hostEntry.Text == "" {
+		app.showError("Host is required to save a bookmark")
+		return
+	}
+	if app.userEntry.Text == "" {
+		app.showError("Username is required to save a bookmark")
+		return
+	}
+	if app.portEntry.Text == "" {
+		app.portEntry.SetText("22") // Default SSH port
+	}
+
+	bookmark := Bookmark{
+		Name:      name,
+		Host:      app.hostEntry.Text,
+		Port:      app.portEntry.Text,
+		Username:  app.userEntry.Text,
+		UseSSHKey: app.useKeyCheck.Checked,
+		KeyPath:   app.keyEntry.Text,
+	}
+
+	// Additional validation for SSH key
+	if bookmark.UseSSHKey && bookmark.KeyPath != "" {
+		if _, err := os.Stat(bookmark.KeyPath); os.IsNotExist(err) {
+			app.showError("SSH key file does not exist: " + bookmark.KeyPath)
+			return
+		}
+	}
+
+	// Check if bookmark with same name exists and replace it
+	found := false
+	for i, existing := range app.bookmarks {
+		if existing.Name == name {
+			app.bookmarks[i] = bookmark
+			found = true
+			break
+		}
+	}
+
+	// If not found, add as new bookmark
+	if !found {
+		app.bookmarks = append(app.bookmarks, bookmark)
+	}
+
+	app.saveBookmarks()
+	app.updateBookmarkSelect()
+	app.logMessage("Bookmark saved: " + name)
+}
+
+func (app *SFTPApp) deleteSelectedBookmark() {
+	selected := app.bookmarkSelect.Selected
+	if selected == "" {
+		return
+	}
+
+	dialog := dialog.NewConfirm("Delete Bookmark",
+		"Are you sure you want to delete the bookmark '"+selected+"'?",
+		func(ok bool) {
+			if ok {
+				app.deleteBookmark(selected)
+			}
+		}, app.window)
+
+	dialog.Show()
+}
+
+func (app *SFTPApp) deleteBookmark(name string) {
+	for i, bookmark := range app.bookmarks {
+		if bookmark.Name == name {
+			app.bookmarks = append(app.bookmarks[:i], app.bookmarks[i+1:]...)
+			break
+		}
+	}
+
+	app.saveBookmarks()
+	app.updateBookmarkSelect()
+	app.bookmarkSelect.ClearSelected()
+	app.deleteBookmarkBtn.Disable()
+	app.logMessage("Bookmark deleted: " + name)
+}
+
+func (app *SFTPApp) updateBookmarkSelect() {
+	app.bookmarkSelect.Options = app.getBookmarkNames()
+	app.bookmarkSelect.Refresh()
+}
+
+func (app *SFTPApp) quickConnectFromBookmark() {
+	selected := app.bookmarkSelect.Selected
+	if selected == "" {
+		return
+	}
+
+	// Load the bookmark data into form fields
+	app.loadBookmarkByName(selected)
+
+	// Trigger the connection
+	app.onConnect()
 }
 
 func main() {
