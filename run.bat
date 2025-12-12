@@ -32,6 +32,31 @@ if not exist "main.go" (
     exit /b 1
 )
 
+REM Check for C compiler (required for Fyne GUI)
+where gcc >nul 2>&1
+if %errorlevel% neq 0 (
+    echo.
+    echo ⚠️  WARNING: No C compiler found!
+    echo    The GUI version requires CGO and a C compiler ^(gcc/MinGW^).
+    echo.
+    echo 📋 To install build tools:
+    echo    1. Download TDM-GCC from: https://jmeubank.github.io/tdm-gcc/
+    echo    2. Install with "Add to PATH" checked
+    echo    3. Restart command prompt and run this script again
+    echo.
+    echo 🔸 Alternative: Use CLI version ^(works without C compiler^)
+    echo.
+
+    set /p choice="Build CLI version instead? (y/n): "
+    if /i "!choice!" == "y" (
+        goto build_cli
+    ) else (
+        echo Please install a C compiler and try again.
+        pause
+        exit /b 1
+    )
+)
+
 echo 📦 Installing dependencies...
 go mod tidy
 if %errorlevel% neq 0 (
@@ -41,20 +66,19 @@ if %errorlevel% neq 0 (
 )
 
 echo 🔨 Building SFTP Client GUI...
+set CGO_ENABLED=1
 go build -o sftp-client-gui.exe main.go app_icon.go
 if %errorlevel% neq 0 (
-    echo ❌ Error: Build failed
-    pause
-    exit /b 1
+    echo ❌ Error: GUI Build failed - trying CLI version...
+    goto build_cli
 )
 
-echo ✅ Build successful!
+echo ✅ GUI Build successful!
 
 REM Check if binary was created
 if not exist "sftp-client-gui.exe" (
     echo ❌ Error: Binary not found after build
-    pause
-    exit /b 1
+    goto build_cli
 )
 
 echo 🎯 Launching SFTP Client GUI...
@@ -72,5 +96,31 @@ echo    • Use the file browsers to navigate and transfer files
 echo    • Check the activity log for operation status
 echo.
 echo 📚 For help and documentation, see README.md
+
+pause
+exit /b 0
+
+:build_cli
+echo.
+echo 🔨 Building CLI version as fallback...
+go build -o sftp-client-cli.exe cli-main.go
+if %errorlevel% neq 0 (
+    echo ❌ Error: CLI build also failed
+    pause
+    exit /b 1
+)
+
+echo ✅ CLI Build successful!
+echo    Executable: sftp-client-cli.exe
+echo.
+echo 🎯 Launching CLI version...
+echo.
+echo 💡 CLI Usage:
+echo    • Type 'help' for available commands
+echo    • Type 'connect host port username password' to connect
+echo    • Type 'quit' to exit
+echo.
+
+.\sftp-client-cli.exe
 
 pause
